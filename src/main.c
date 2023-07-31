@@ -34,7 +34,7 @@ static void redboard_init(void)
 	am_hal_sysctrl_fpu_stacking_enable(true);
 
 	uart_init(&uart, UART_INST0);
-	initialize_sys_uart(&uart);
+	syscalls_uart_init(&uart);
 
 	// After init is done, enable interrupts
 	am_hal_interrupt_master_enable();

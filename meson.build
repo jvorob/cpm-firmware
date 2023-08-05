@@ -38,19 +38,23 @@ includes = include_directories([
   'include/example',
 ])
 
+# Change this to false if you do not want to install library
+install_library = true
 lib = library(meson.project_name(),
   lib_sources,
   include_directories: includes,
   c_args: c_args,
   link_args: link_args,
-  install: true, # Change this to false if you do not want to install library
+  install: install_library,
 )
 
 install_subdir('include', install_dir: '')
 
-# Create a pkgconfig file
-pkg = import('pkgconfig')
-pkg.generate(lib, subdirs: ['', 'example'])
+if (install_library == true)
+  # Create a pkgconfig file
+  pkg = import('pkgconfig')
+  pkg.generate(lib, subdirs: ['', 'example'])
+endif
 
 
 # Section defining the executable

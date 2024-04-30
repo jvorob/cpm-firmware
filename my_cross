@@ -1,0 +1,6 @@
+# Created per the readme at https://github.com/gemarcano/redboard_template
+# This overwrites the prefix constant introduced by the artemis crossfile
+
+[constants]
+prefix = '/home/jan/school/research/pat/artemis/AmbiqSuiteSDK_Install'
+

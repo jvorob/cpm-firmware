@@ -2,4 +2,4 @@ set pagination off
 set confirm off
 target extended-remote :2331
 load
-run
+monitor SWO EnableTarget 48000000 1000000 1 0

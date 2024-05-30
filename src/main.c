@@ -292,11 +292,36 @@ int main(void)
     
 
     // === Setup UART, send hello
-    am_bsp_uart_printf_enable();
+    //am_bsp_uart_printf_enable();
+    //am_bsp_itm_printf_enable();
 
-    am_util_stdio_terminal_clear();
+    // ======== TEMP MANUALLY ENABLE ITM PRINTF
+    am_hal_tpiu_config_t TPIUcfg;
+
+    // Enable the ITM interface and the SWO pin.
+    am_hal_itm_enable();
+
+    // Enable the ITM and TPIU
+    // Set the BAUD clock for 1M
+    TPIUcfg.ui32SetItmBaud = AM_HAL_TPIU_BAUD_DEFAULT;
+    am_hal_tpiu_enable(&TPIUcfg);
+    am_hal_gpio_pinconfig(AM_BSP_GPIO_ITM_SWO, g_AM_BSP_GPIO_ITM_SWO);
+    // Attach the ITM to the STDIO driver.
+    am_util_stdio_printf_init(am_hal_itm_print);
+
+    // ======== END MANUAL ITM
+
+    //am_util_stdio_terminal_clear();
     am_util_stdio_printf("Hello World! (Over UART!)\n\n");
     //am_hal_uart_tx_flush(phUART);
+
+
+    
+    while(1){
+        am_util_stdio_printf("Hello!\n");
+        am_util_delay_ms(2000);
+
+    } // TODO TEMP: CHECK PRINTF
     
 
     //===== setup iom, read some regs

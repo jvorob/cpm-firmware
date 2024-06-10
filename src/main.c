@@ -5,8 +5,11 @@
 
 //#include <example.h>
 
-//#include <uart.h>
-//#include <syscalls.h>
+// ==== Let's try bringing in some asimple stuff
+#include <uart.h>
+#include <syscalls.h>
+#include <spi.h>
+#include <lora.h>
 
 #include "am_mcu_apollo.h"
 #include "am_bsp.h"
@@ -23,6 +26,8 @@
 //#include <time.h>
 
 //struct uart uart;
+
+
 
 #define BLINK_PERIOD 2000
 
@@ -62,17 +67,6 @@
 // 	// Any destructors/code that should run when main returns should go here
 // }
 
-
-//void set_leds(bool led_state) {
-//#ifdef AM_BSP_NUM_LEDS
-//    //uint32_t ui32GPIONumber;
-//    for (uint32_t ux = 0; ux < AM_BSP_NUM_LEDS; ux++) {
-//        //ui32GPIONumber = am_bsp_psLEDs[ux].ui32GPIONumber;
-//        (led_state) ? am_devices_led_on(am_bsp_psLEDs, ux) :
-//                      am_devices_led_off(am_bsp_psLEDs, ux);
-//    }
-//#endif // AM_BSP_NUM_LEDS
-//}
 
 void set_leds(bool led_state) {
     (led_state) ? am_hal_gpio_state_write(JV_PIN_LED, AM_HAL_GPIO_OUTPUT_SET) :
@@ -154,75 +148,6 @@ void init_iom( void ){
     status = am_hal_gpio_pinconfig(AM_BSP_GPIO_IOM0_CS3, g_AM_BSP_GPIO_IOM0_CS3);
     if(status != AM_HAL_STATUS_SUCCESS){ report(status); }\
 }
-
-
-// // for MCP4162
-// // register in 0-15, gives back 10-bit result
-// int  spi_read_reg(int reg) {
-//     reg = reg & 0xF;
-// 
-//     uint8_t cmd[4];
-//     uint8_t rx_buf[4];
-//     cmd[0] = (reg << 4) | 0xC; // rrrr 11 .., 11 is read
-//     cmd[1] = 0;
-// 
-//     //NOTE: i think IOM0 CS0 might be pin 11? see bsps
-//     xfer.uPeerInfo.ui32SpiChipSelect = JV_RHEO_CS_CHAN;
-//     xfer.ui32InstrLen = 0;
-//     xfer.ui32Instr = 0;
-//     xfer.ui32NumBytes = 2;
-//     xfer.eDirection = AM_HAL_IOM_FULLDUPLEX;
-//     xfer.pui32TxBuffer = (uint32_t*)cmd;
-//     xfer.pui32RxBuffer = (uint32_t*)rx_buf;
-//     xfer.bContinue = false;
-//     xfer.ui8RepeatCount = 0;
-//     xfer.ui8Priority = 1;
-//     xfer.ui32PauseCondition = 0;
-//     xfer.ui32StatusSetClr = 0;
-// 
-//     //am_util_stdio_printf("reading reg %d:\n", reg);
-//     uint32_t status = AM_HAL_STATUS_SUCCESS;
-//     status = am_hal_iom_spi_blocking_fullduplex(iom_handle, &xfer);
-//     if(status != AM_HAL_STATUS_SUCCESS) { report(status);}
-// 
-//     int result = ((uint32_t)(rx_buf[0] & 0x1) << 8) | rx_buf[1];
-//     return result;
-// }
-// 
-// // for MCP4162
-// // register in 0-15, 
-// // value up to 9 bits
-// int  spi_write_reg(int reg, int value) {
-//     reg = reg & 0xF;
-// 
-//     uint8_t cmd[4];
-//     uint8_t rx_buf[4];
-//     cmd[0] = (reg << 4) | ((value >> 8) &0x1); 
-//     // rrrr 00 .d, 00 is write, d is bit 8
-//     cmd[1] = (value & 0xff);
-// 
-//     //NOTE: i think IOM0 CS0 might be pin 11? see bsps
-//     xfer.uPeerInfo.ui32SpiChipSelect = JV_RHEO_CS_CHAN;
-//     xfer.ui32InstrLen = 0;
-//     xfer.ui32Instr = 0;
-//     xfer.ui32NumBytes = 2;
-//     xfer.eDirection = AM_HAL_IOM_FULLDUPLEX;
-//     xfer.pui32TxBuffer = (uint32_t*)cmd;
-//     xfer.pui32RxBuffer = (uint32_t*)rx_buf;
-//     xfer.bContinue = false;
-//     xfer.ui8RepeatCount = 0;
-//     xfer.ui8Priority = 1;
-//     xfer.ui32PauseCondition = 0;
-//     xfer.ui32StatusSetClr = 0;
-// 
-//     //am_util_stdio_printf("reading reg %d:\n", reg);
-//     uint32_t status = AM_HAL_STATUS_SUCCESS;
-//     status = am_hal_iom_spi_blocking_fullduplex(iom_handle, &xfer);
-//     if(status != AM_HAL_STATUS_SUCCESS) { report(status);}
-// 
-//     int result = ((uint32_t)(rx_buf[0] & 0x1) << 8) | rx_buf[1];
-//     return result;
-// }
 
 
 // for RFM95W
@@ -319,6 +244,17 @@ void spi_write_lora_reg(int reg, int val) {
     //return rx_buf[1]; //the 0th byte was the addr, the 1st byte is resp
 }
 
+uint8_t tmp_read_reg(struct spi_device *device, uint8_t addr){
+    uint8_t buff_val;
+    spi_device_cmd_read(device, addr, &buff_val, 1);
+    return buff_val;
+}
+
+void tmp_write_reg(struct spi_device *device, uint8_t addr, uint8_t val){
+    uint8_t buff_val = val;
+    spi_device_cmd_write(device, addr | 0x80, &buff_val, 1);
+}
+
 //*********************************************
 //
 //                    main
@@ -328,6 +264,10 @@ void spi_write_lora_reg(int reg, int val) {
 int main(void)
 {
 
+    //*********************************************
+    //        INITIALIZE CHIP-WIDE STUFF
+    //*********************************************
+
 	// Prepare MCU by init-ing clock, cache, and power level operation
 	am_hal_clkgen_control(AM_HAL_CLKGEN_CONTROL_SYSCLK_MAX, 0);
 	am_hal_cachectrl_config(&am_hal_cachectrl_defaults);
@@ -336,7 +276,10 @@ int main(void)
 	//am_hal_sysctrl_fpu_enable();
 	//am_hal_sysctrl_fpu_stacking_enable(true);
     
-    // ====== Init GPIO Pins (using CS (p28) as a gpio)
+    //*********************************************
+    //             INITIALIZE GPIOS
+    //*********************************************
+
     // Random functions im collecting
     //am_hal_gpio_pinconfig(JV_CS_PIN,  g_AM_HAL_GPIO_OUTPUT);
     //am_hal_gpio_pinconfig(JV_CS_PIN,  g_AM_HAL_GPIO_OUTPUT);
@@ -372,8 +315,9 @@ int main(void)
     am_hal_gpio_pinconfig(JV_PIN_ADC_DP1N,    g_AM_HAL_GPIO_INPUT);
     am_hal_gpio_pinconfig(JV_PIN_ADC_DP1P,    g_AM_HAL_GPIO_INPUT);
 
-
-    
+    //*********************************************
+    //             INITIALIZE UART
+    //*********************************************
 
     // === Setup UART, send hello
     //am_bsp_uart_printf_enable();
@@ -393,6 +337,31 @@ int main(void)
     // Attach the ITM to the STDIO driver.
     am_util_stdio_printf_init(am_hal_itm_print);
     // ======== END MANUAL ITM
+    
+
+    //*********************************************
+    //             INITIALIZE ASIMPLE SPI
+    //*********************************************
+    
+    //Manual SPI Init
+    //init_iom();
+
+
+    // Asimple spi init
+    struct spi_bus* spi_bus_0;
+    struct spi_device* lora_device;
+
+    // Init LORA as spi device, 10kHz
+    spi_bus_0 = spi_bus_get_instance(SPI_BUS_0);
+    lora_device = spi_device_get_instance(spi_bus_0, SPI_CS_0, 10000);
+
+    if(!spi_bus_enable(spi_bus_0)) { report(-1); }
+
+    tmp_read_reg(lora_device, 0x01);
+
+    //*********************************************
+    //          END OF INITIALIZATION
+    //*********************************************
 
     //am_util_stdio_terminal_clear();
     am_util_stdio_printf("Hello World! (Over UART!)\n\n");
@@ -413,10 +382,9 @@ int main(void)
     
 
     //===== setup iom, read some regs
-    init_iom();
     am_util_stdio_printf("READING INITIAL REGOPMODE\n");
-    am_util_stdio_printf("lora reg 0x%x: 0x%x\n", 1, spi_read_lora_reg(1));
-    am_util_stdio_printf("lora version (@0x%x): 0x%x\n", 0x42, spi_read_lora_reg(0x42));
+    am_util_stdio_printf("lora reg 0x%x: 0x%x\n", 1, tmp_read_reg(lora_device, 0x01));
+    am_util_stdio_printf("lora version (@0x%x): 0x%x\n", 0x42, tmp_read_reg(lora_device, 0x42));
 
     //===== try resetting the Lora module
     am_util_stdio_printf("RESETTING LORA MODULE:\n");
@@ -435,19 +403,21 @@ int main(void)
     spi_read_lora_nregs(0x41, 0x42); //read first 15 bytes? skipping addr 0
 
     am_util_stdio_printf("Trying Wakeup\n");
-    spi_write_lora_reg(0x1, 0x89); //RegOpMode, set to sleep
-    am_util_stdio_printf("lora reg 0x%x: 0x%x\n", 1, spi_read_lora_reg(1));
+    tmp_write_reg(lora_device, 0x1, 0x89); //RegOpMode, set to sleep
+    am_util_stdio_printf("lora reg 0x%x: 0x%x\n", 1, tmp_read_reg(lora_device, 1));
 
     am_util_stdio_printf("Enabling LORA MODE\n");
-    spi_write_lora_reg(0x1, 0x08); //RegOpMode, set to sleep
-    spi_write_lora_reg(0x1, 0x88); //RegOpMode, enable lora
-    spi_write_lora_reg(0x1, 0x89); //RegOpMode, wake to stdby mode
+    tmp_write_reg(lora_device, 0x1, 0x08); //RegOpMode, set to sleep
+    am_util_stdio_printf("lora reg 0x%x: 0x%x\n", 1, tmp_read_reg(lora_device, 1));
+    tmp_write_reg(lora_device, 0x1, 0x88); //RegOpMode, enable lora
+    tmp_write_reg(lora_device, 0x1, 0x89); //RegOpMode, wake to stdby mode
     //set to lora mode (bit 7)
     //set to Low freq mode (bit3 hi)
     //set to stdby mode (low bits 001)
     am_util_stdio_printf("READING LORA REGS:\n");
     for (int reg = 0; reg < 8; reg++) {
-        int res = spi_read_lora_reg(reg);
+        //int res = spi_read_lora_reg(reg);
+        int res = tmp_read_reg(lora_device, reg);
         am_util_stdio_printf("lora reg 0x%x: 0x%x\n", reg, res);
     }
 

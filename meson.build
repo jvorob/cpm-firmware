@@ -28,7 +28,7 @@ m_dep = cc.find_library('m', required : false)
 # Adjust these libraries to use the right version for the board in use. The
 # defaults here are for the Redboard ATP.
 ambiq_lib = dependency('ambiq_rba_atp')
-#asimple_lib = dependency('asimple_rba_atp') # TODO JV
+asimple_lib = dependency('asimple_rba_atp')
 
 # This section is for building most of the program as a library
 lib_sources = files([
@@ -66,8 +66,7 @@ sources = files([
 exe = executable(meson.project_name(),
   sources,
   link_with: lib,
-  #dependencies: [ambiq_lib, m_dep, asimple_lib], TODO JV
-  dependencies: [ambiq_lib, m_dep],
+  dependencies: [ambiq_lib, m_dep, asimple_lib],
   include_directories: includes,
   c_args: c_args,
   link_args: link_args + ['-T' + meson.source_root() / 'linker.ld']

@@ -139,6 +139,47 @@ void tmp_write_reg(struct spi_device *device, uint8_t addr, uint8_t val){
 
 //*********************************************
 //
+//              low-power helpers
+//
+//*********************************************
+
+
+// Enable/disable the debugger UART?
+// NOTE: copied mostly from bsp file, but changed to 1M baud
+// (couldn't get 2M working)
+void jv_itm_printf_enable() {
+    //am_bsp_uart_printf_enable();
+    //am_bsp_itm_printf_enable();
+
+    // ======== TEMP MANUALLY ENABLE ITM PRINTF
+    am_hal_tpiu_config_t TPIUcfg;
+
+    // Enable the ITM interface and the SWO pin.
+    am_hal_itm_enable();
+
+    // Enable the ITM and TPIU
+    // Set the BAUD clock for 1M
+    //TPIUcfg.ui32SetItmBaud = AM_HAL_TPIU_BAUD_DEFAULT;
+    TPIUcfg.ui32SetItmBaud = AM_HAL_TPIU_BAUD_1M;
+    am_hal_tpiu_enable(&TPIUcfg);
+    am_hal_gpio_pinconfig(AM_BSP_GPIO_ITM_SWO, g_AM_BSP_GPIO_ITM_SWO);
+    // Attach the ITM to the STDIO driver.
+    am_util_stdio_printf_init(am_hal_itm_print);
+    // ======== END MANUAL ITM
+    
+    ////Unused bonus funcs?
+    //am_hal_tpiu_clock_enable();
+}
+void jv_itm_printf_disable() {
+    am_hal_itm_disable();
+    am_util_stdio_printf_init(0);
+
+    ////Unused bonus funcs?
+    //am_hal_tpiu_clock_disable();
+}
+
+//*********************************************
+//
 //          Test functions (inf loops)
 //
 //*********************************************
@@ -337,6 +378,60 @@ void testprog_morse() {
     }
 }
 
+
+struct tp_sleep_state {
+    bool led_state;
+} tp_sleep_state = {};
+
+// v0: use a timer/IRQ to blink an LED
+// v1: go to sleep and use a timer to wake up
+void testprog_sleep() {
+    am_util_stdio_printf("Starting sleep program:\n");
+
+    am_util_stdio_printf("Test 1:\n");
+    jv_itm_printf_disable();
+    am_util_delay_ms(1000);
+    //am_util_stdio_printf("Test 2(asleep):\n");
+    jv_itm_printf_enable();
+    am_util_stdio_printf("Test 3:\n");
+    // Test Uart on/off
+    
+
+
+    // ==== SETUP RTC, ENABLE INTERRUPTS
+    //  Start the RTC
+    am_hal_clkgen_control(AM_HAL_CLKGEN_CONTROL_XTAL_START, 0);
+    am_hal_rtc_osc_select(AM_HAL_RTC_OSC_XT);
+    am_hal_rtc_osc_enable();
+                                              
+    // Configure alarm to interrupt every second
+    am_hal_rtc_alarm_interval_set(AM_HAL_RTC_ALM_RPT_SEC);
+
+    // Clear, then enable rtc interrupt
+    am_hal_rtc_int_clear(AM_HAL_RTC_INT_ALM);
+    am_hal_rtc_int_enable(AM_HAL_RTC_INT_ALM);
+    NVIC_EnableIRQ(RTC_IRQn);
+
+    // enable interrupts corewide
+    am_hal_interrupt_master_enable();
+
+    am_util_stdio_printf("RTC INTEN = %0x\n", am_hal_rtc_int_enable_get());
+
+    while(1){} //busy loop
+
+}
+
+void am_rtc_isr() { //overrides the main isr
+    am_hal_rtc_int_clear(AM_HAL_RTC_INT_ALM);
+
+    am_util_stdio_printf("rtc ISR recieved\n");
+
+    tp_sleep_state.led_state = !tp_sleep_state.led_state;
+    set_leds(tp_sleep_state.led_state);
+}
+
+
+
 //*********************************************
 //
 //                    main
@@ -373,19 +468,18 @@ int main(void)
     // == Enable LED output, 2mA drive
     am_hal_gpio_pinconfig(JV_PIN_LED,  g_AM_HAL_GPIO_OUTPUT);
 
-    //Enable Lora (LORA_EN high, RESET low)
-    am_hal_gpio_pinconfig(JV_PIN_LORA_EN,     g_AM_HAL_GPIO_OUTPUT);
-    am_hal_gpio_state_write(JV_PIN_LORA_EN, AM_HAL_GPIO_OUTPUT_SET);
+    //Enable Lora (LORA_EN high, nRESET high)
+    am_hal_gpio_pinconfig(  JV_PIN_LORA_EN,   g_AM_HAL_GPIO_OUTPUT);
+    am_hal_gpio_state_write(JV_PIN_LORA_EN,   AM_HAL_GPIO_OUTPUT_SET);
 
     am_hal_gpio_pinconfig(JV_PIN_LORA_RST,    g_AM_HAL_GPIO_OUTPUT);
-    //am_hal_gpio_state_write(JV_PIN_LORA_RST, AM_HAL_GPIO_OUTPUT_CLEAR);
     am_hal_gpio_state_write(JV_PIN_LORA_RST, AM_HAL_GPIO_OUTPUT_SET);
 
     am_hal_gpio_pinconfig(JV_PIN_LORA_DI0,    g_AM_HAL_GPIO_INPUT);
 
     //Setup ADP Pins to do nothing (DIS_SW low)
-    am_hal_gpio_pinconfig(JV_PIN_ADP_PGOOD,   g_AM_HAL_GPIO_INPUT);
-    am_hal_gpio_pinconfig(JV_PIN_ADP_DIS_SW,  g_AM_HAL_GPIO_OUTPUT);
+    am_hal_gpio_pinconfig(  JV_PIN_ADP_PGOOD,  g_AM_HAL_GPIO_INPUT);
+    am_hal_gpio_pinconfig(  JV_PIN_ADP_DIS_SW, g_AM_HAL_GPIO_OUTPUT);
     am_hal_gpio_state_write(JV_PIN_ADP_DIS_SW, AM_HAL_GPIO_OUTPUT_CLEAR);
 
     // Setup ADC pins as inputs
@@ -402,26 +496,7 @@ int main(void)
     //*********************************************
 
     // === Setup UART, send hello
-    //am_bsp_uart_printf_enable();
-    //am_bsp_itm_printf_enable();
-
-    // ======== TEMP MANUALLY ENABLE ITM PRINTF
-    am_hal_tpiu_config_t TPIUcfg;
-
-    // Enable the ITM interface and the SWO pin.
-    am_hal_itm_enable();
-
-    // Enable the ITM and TPIU
-    // Set the BAUD clock for 1M
-    TPIUcfg.ui32SetItmBaud = AM_HAL_TPIU_BAUD_DEFAULT;
-    am_hal_tpiu_enable(&TPIUcfg);
-    am_hal_gpio_pinconfig(AM_BSP_GPIO_ITM_SWO, g_AM_BSP_GPIO_ITM_SWO);
-    // Attach the ITM to the STDIO driver.
-    am_util_stdio_printf_init(am_hal_itm_print);
-    // ======== END MANUAL ITM
-    
-
-
+    jv_itm_printf_enable();
     am_util_stdio_printf("Initialization complete\n");
 
     //*********************************************
@@ -429,12 +504,13 @@ int main(void)
     //*********************************************
     
     //am_util_stdio_terminal_clear();
-    am_util_stdio_printf("Hello World! (Over UART!!)\n\n");
+    am_util_stdio_printf("Hello World! (Over UART!!)\n=============\n");
     //am_hal_uart_tx_flush(phUART);
     
     // Go into one of our test program (these dont return!)
 
     //testprog_helloblinky();
-    testprog_lora();
+    //testprog_lora();
     //testprog_morse();
+    testprog_sleep();
 }

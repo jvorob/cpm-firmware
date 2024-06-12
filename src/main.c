@@ -431,6 +431,50 @@ void am_rtc_isr() { //overrides the main isr
 }
 
 
+// Put LFRC 1kHz clock onto pin 0
+void testprog_lfrc_cal() {
+    am_util_stdio_printf("Starting LFRC test program\n");
+    am_util_stdio_printf("Switching pad 0 to clkout\n");
+
+    // Configure pad0 as clkout
+    const am_hal_gpio_pincfg_t gpio0_clkout = 
+    {
+        .uFuncSel             = 2, // pad 0, funcsel 2 is clkout
+        .eDriveStrength       = AM_HAL_GPIO_PIN_DRIVESTRENGTH_2MA,
+        .eGPOutcfg            = AM_HAL_GPIO_PIN_OUTCFG_PUSHPULL,
+    };
+    int status;
+    status = am_hal_gpio_pinconfig(0, gpio0_clkout);
+    if(status != AM_HAL_STATUS_SUCCESS) { report(status);}
+
+    // === Enable clkout from LFRC
+    //status = am_hal_clkgen_clkout_enable(true, AM_HAL_CLKGEN_CLKOUT_LFRC_1024);
+    //status = am_hal_clkgen_clkout_enable(true, AM_HAL_CLKGEN_CLKOUT_ULFRC_1); //1Hz
+
+    // === OR Enable clkout from XTAL (need to enable XTAL manually)
+    am_hal_clkgen_control(AM_HAL_CLKGEN_CONTROL_XTAL_START, 0);
+    status = am_hal_clkgen_clkout_enable(true, AM_HAL_CLKGEN_CLKOUT_XTAL_1024);
+
+    // See also: AM_HAL_CLKGEN_CLKOUT_ULFRC_1, ~1Hz, various other divisions, XTAL,
+    
+    if(status != AM_HAL_STATUS_SUCCESS) { report(status);}
+
+    // === Print status and wrap up
+    // takes 2 sec after selection of new RTC oscillator
+    am_util_stdio_printf("Configured, waiting 2 sec...\n");
+
+    am_hal_clkgen_status_t clk_stat = {};
+    am_hal_clkgen_status_get(&clk_stat);
+
+    am_util_stdio_printf("Current sysclk freq = %.dHz\n", clk_stat.ui32SysclkFreq);
+    am_util_stdio_printf("RTC Oscillator:  %s\n", 
+            clk_stat.eRTCOSC == AM_HAL_CLKGEN_STATUS_RTCOSC_LFRC ? "LFRC":"XTAL");
+    am_util_stdio_printf("bXtalFailure (or  LFRC is clkout): %s\n", clk_stat.bXtalFailure ? "true":"false");
+
+    
+    am_util_stdio_printf("Oscillating, entering busyloop\n");
+    while(1){}
+}
 
 //*********************************************
 //
@@ -497,14 +541,14 @@ int main(void)
 
     // === Setup UART, send hello
     jv_itm_printf_enable();
-    am_util_stdio_printf("Initialization complete\n");
+    am_util_stdio_printf("\n\n\n==============\nInitialization complete\n");
 
     //*********************************************
     //          END OF INITIALIZATION
     //*********************************************
     
     //am_util_stdio_terminal_clear();
-    am_util_stdio_printf("Hello World! (Over UART!!)\n=============\n");
+    am_util_stdio_printf("Hello World! (Over UART!!)\n==============\n");
     //am_hal_uart_tx_flush(phUART);
     
     // Go into one of our test program (these dont return!)
@@ -512,5 +556,6 @@ int main(void)
     //testprog_helloblinky();
     //testprog_lora();
     //testprog_morse();
-    testprog_sleep();
+    //testprog_sleep();
+    testprog_lfrc_cal();
 }

@@ -854,7 +854,7 @@ void testprog_lfrc_cal() {
     // Configure pad0 as clkout
     const am_hal_gpio_pincfg_t gpio0_clkout =
     {
-        .uFuncSel             = 2, // pad 0, funcsel 2 is clkout
+        .uFuncSel             = AM_HAL_PIN_0_CLKOUT,
         .eDriveStrength       = AM_HAL_GPIO_PIN_DRIVESTRENGTH_2MA,
         .eGPOutcfg            = AM_HAL_GPIO_PIN_OUTCFG_PUSHPULL,
     };

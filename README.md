@@ -1,15 +1,17 @@
 
 # Cathodic Protection Monitoring - Firmware
 
-_Janet Vorobyeva_
+*Janet Vorobyeva*
 
 This repo contains the firmware for my Cathodic Protection Monitoring project, as part of [CSE237D](https://kastner.ucsd.edu/ryan/cse-237d-embedded-system-design/), Embedded System Design.
 
-The goal of the project was to develop an energy-harvesting sensor node to monitor the health a 
- [cathodic protection](https://en.wikipedia.org/wiki/Cathodic_protection) system. This sensor
+The goal of the project was to develop an energy-harvesting sensor node to monitor the health of a 
+[cathodic protection](https://en.wikipedia.org/wiki/Cathodic_protection) system. This sensor
 can sustain itself on a trickle of power (<250 uW), and so can run directly
 from the electric potential it's designed to measure. It transmits measurements several times a day
 over a [LoRa](https://en.wikipedia.org/wiki/LoRa) radio, (range of up to 5-15km, depending on conditions)
+
+For more info, please refer to this repo's [wiki](https://github.com/jvorob/cpm-firmware/wiki)
 
 
 ![Photo of the sensor board](board_photo.jpg)

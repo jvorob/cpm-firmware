@@ -10,6 +10,7 @@
 #include <syscalls.h>
 #include <spi.h>
 #include <lora.h>
+#include <adc.h>
 
 #include "am_mcu_apollo.h"
 #include "am_bsp.h"
@@ -28,6 +29,8 @@
 //struct uart uart;
 
 
+// Chip ID, sent out in LORA PACKETS
+#define CHIP_ID "AM01\0"
 
 #define BLINK_PERIOD 2000
 
@@ -44,7 +47,8 @@
 #define JV_PIN_LORA_DI0 38
 
 #define JV_PIN_ADP_PGOOD 39
-#define JV_PIN_ADP_DIS_SW 49
+#define JV_PIN_ADP_DIS_SW 40
+#define JV_PIN_ADP_BAT_DIVIDER 41 //Temporary measure, used to divide V_BATT by 2
 
 #define JV_PIN_ADC_VIN  16 // ADC0/TRIG0/CMPIN0
 #define JV_PIN_ADC_VBAT 31 // ADC3
@@ -143,6 +147,7 @@ void tmp_write_reg(struct spi_device *device, uint8_t addr, uint8_t val){
 //              low-power helpers
 //
 //*********************************************
+
 
 
 // Enable/disable the debugger UART?
@@ -289,6 +294,69 @@ bool jv_is_debugger_attached() {
     return debuggerAttached;
 }
 
+// ===================================
+// Ctimer funcs
+//
+// Time will be set to count up 
+
+
+int g_am_ctimer_isrcount = 0;
+
+void am_ctimer_isr(void) {
+    am_hal_ctimer_int_clear(AM_HAL_CTIMER_INT_TIMERA0);
+    g_am_ctimer_isrcount++;
+}
+
+
+void jv_ctimer_sleep_ms(int ms) {
+    int clocks = ms * 512/1000;
+    //am_util_stdio_printf("Preparing to ctimer sleep for %d ms (%d clocks)\n", ms, clocks);
+    if(clocks <= 0 || clocks > 10000) {
+        am_util_stdio_printf("ERROR: ctimer_sleep clocks out of range\n", ms, clocks);
+        while(1);
+    }
+    
+
+    // Reset timer in case it's running
+    am_hal_ctimer_stop(0, AM_HAL_CTIMER_TIMERA);
+    am_hal_ctimer_clear(0, AM_HAL_CTIMER_TIMERA);
+
+    // Configure timer A0 at 512HZ, singleshot, with interrupts, to sleep for the desired time
+    am_hal_ctimer_config_single(0, AM_HAL_CTIMER_TIMERA,
+            AM_HAL_CTIMER_LFRC_512HZ |
+            AM_HAL_CTIMER_FN_ONCE |
+            AM_HAL_CTIMER_INT_ENABLE);
+    am_hal_ctimer_period_set(0, AM_HAL_CTIMER_TIMERA, clocks, 0); // period, onTime
+
+    // Enable timer interrupts
+    am_hal_ctimer_int_enable(AM_HAL_CTIMER_INT_TIMERA0);
+    NVIC_EnableIRQ(CTIMER_IRQn);
+    // NOTE: make sure am_hal_interrupt_master_enable() has been called
+                                                               
+    //am_util_stdio_printf("About to ctimer sleep: ctimer count was %d\n", g_am_ctimer_isrcount);
+
+    // Clear the isrcount so we can sleep until it fires
+    am_hal_ctimer_stop(0, AM_HAL_CTIMER_TIMERA);
+    //am_hal_ctimer_clear(0, AM_HAL_CTIMER_TIMERA);
+    g_am_ctimer_isrcount = 0;
+    am_hal_ctimer_start(0, AM_HAL_CTIMER_TIMERA);
+
+    int i = 0;
+    while(!g_am_ctimer_isrcount) {
+        jv_itm_printf_disable(); //TODO: does this actually power down the interface?
+        am_hal_sysctrl_sleep(AM_HAL_SYSCTRL_SLEEP_DEEP);
+        jv_itm_printf_enable(); //TODO: does this actually power down the interface?
+        //am_util_stdio_printf("Awoke from ctimer\n");
+        i++;
+        if(i > 1000) {
+            am_util_stdio_printf("ERR: didn't get ctimer ISR? breaking out\n"); 
+            break; 
+        } //Something's wrong with our ISR
+    }
+
+    // Timer should have stopped automatically
+}
+
 
 // Blinks LED N times, 50ms on, 50ms off
 // BLOCKS
@@ -296,14 +364,17 @@ void jv_blink_n(int n) {
     if(n <= 0) { return; }
 
     set_leds(true);
-    am_util_delay_ms(50);
+    //am_util_delay_ms(50);
+    jv_ctimer_sleep_ms(50);
     set_leds(false);
 
     // (Split into first blink/next blinks to avoid extra sleep at end)
     for(int i = 0; i < n-1; i++) { // this happens n-1 times
-        am_util_delay_ms(50);
+        //am_util_delay_ms(50);
+        jv_ctimer_sleep_ms(100);
         set_leds(true);
-        am_util_delay_ms(50);
+        //am_util_delay_ms(50);
+        jv_ctimer_sleep_ms(50);
         set_leds(false);
     }
 }
@@ -364,6 +435,43 @@ bool jv_lora_poweroff() {
 
     return true;
 }
+
+
+// Checks as many things as possible if they're ready for deep sleep
+// returns true if all good, returns false otherwise
+bool jv_check_deepsleep_ready() {
+    // Count enabled peripherals
+    int num_enabled = 0;
+    for (int i = 1; i < AM_HAL_PWRCTRL_PERIPH_MAX; i++) {
+        uint32_t enabled = 0;
+        int status = am_hal_pwrctrl_periph_enabled(i, &enabled);
+        if(status != AM_HAL_STATUS_SUCCESS) {report(status);}
+        if(enabled) { num_enabled++; }
+    }
+
+    // Verify TPIU disabled
+    bool tpiu_was_disabled = MCUCTRL->TPIUCTRL_b.ENABLE == MCUCTRL_TPIUCTRL_ENABLE_DIS;
+
+    bool debugger = jv_is_debugger_attached();
+
+    if(num_enabled > 0 || !tpiu_was_disabled) {
+        jv_itm_printf_enable();
+        am_util_stdio_printf("DEEPSLEEP WARNING: %d peripherals enabled, TPIU_EN:%c, JTAG:%c\n", 
+                num_enabled, tpiu_was_disabled?'F':'T', debugger?'T':'F');
+        jv_itm_printf_disable();
+        return false;
+    }
+
+    if(debugger) { // Don't print for this since I'll always have the debugger attached when printing
+        return false;
+    }
+
+    return true;
+}
+
+
+
+
 
 //*********************************************
 //
@@ -619,7 +727,7 @@ void testprog_sleep() {
 
     // =====================================================
     // ====== CONFIGURE FLASH, SRAM, CACHE FOR DEEP SLEEP
-    am_util_stdio_printf("Preparing to enter deep sleep\n");
+    am_util_stdio_printf("Configure memory for deep sleep\n");
 
     // Enable flash? only bottom 512K?
     if ( am_hal_pwrctrl_memory_enable(AM_HAL_PWRCTRL_MEM_FLASH_MIN) )
@@ -836,9 +944,78 @@ void testprog_sleep() {
 
 }
 
+//*********************************************
+//
+//       Test Program: ADC
+//
+//*********************************************
+
+
+void testprog_adc() {
+    am_util_stdio_printf("Starting ADC test program\n");
+
+    struct adc adc_storage = {};
+    struct adc *adc_p = &adc_storage;
+
+    //uint8_t pins[] = {16, 11}; //16 is ADC_SE0, 11 is SPI0 CE0
+    uint8_t pins[] = {16, 31}; //16 is ADC_SE0 (VIN), 31 is ADC_SE3 (V_BATT)
+    am_hal_adc_slot_chan_e channels[] = { 
+        AM_HAL_ADC_SLOT_CHSEL_SE0, 
+        AM_HAL_ADC_SLOT_CHSEL_SE3, 
+        AM_HAL_ADC_SLOT_CHSEL_VSS,
+        AM_HAL_ADC_SLOT_CHSEL_BATT,
+    };
+
+    //}
+    //size_t num_slots = sizeof(pins) / sizeof(pins[0]);
+    size_t num_slots = sizeof(channels) / sizeof(channels[0]);
+    uint32_t samples[num_slots] = {};
+
+    am_util_stdio_printf("Initializing ADC to read %d pins\n", num_slots);
+    //adc_init(adc_p, pins, num_slots);
+    adc_init_channels(adc_p, channels, num_slots);
+
+    while(1) {
+        am_util_stdio_printf("Triggering ADC\n");
+        adc_trigger(adc_p);
+
+        am_util_stdio_printf("Fetching samples\n");
+
+        //while(!adc_get_sample(adc_p, samples, pins, num_slots)) { 
+        while(!adc_get_sample_channels(adc_p, samples, channels, num_slots)) { 
+            am_hal_sysctrl_sleep(AM_HAL_SYSCTRL_SLEEP_NORMAL);
+        }
+        
+        am_util_stdio_printf("Got ADC Samples:\n");
+        for (size_t i = 0; i < num_slots; i++) {
+            int val = samples[i];
+            double val_pct = (double)samples[i] / (double)0x3FFF * 100;
+
+            const double reference = 2.0;
+            double voltage = val * reference / ((1 << 14) - 1);
+
+            //am_util_stdio_printf("Slot %d, pin %d: val 0x%x (%d), %.1lf%%, %.3lfV\n", i, pins[i], samples[i], samples[i], val_pct, voltage);
+            am_util_stdio_printf("Slot %d, chan %d: val 0x%x (%d), %.1lf%%, %.3lfV\n", i, channels[i], samples[i], samples[i], val_pct, voltage);
+        }
+
+
+        am_util_delay_ms(1000);
+    }
+
+}
+
+//*********************************************
+//
+//       Test Program: LFRC Calibration
+//
+//*********************************************
+
+uint32_t g_rtc_isr_count = 0;
+
 void am_rtc_isr() { //overrides the main isr
     am_hal_rtc_int_clear(AM_HAL_RTC_INT_ALM);
 
+    g_rtc_isr_count++;
     //am_util_stdio_printf("rtc ISR recieved\n");
 
     //tp_sleep_state.led_state = !tp_sleep_state.led_state;
@@ -893,6 +1070,273 @@ void testprog_lfrc_cal() {
 
 //*********************************************
 //
+//       Test Program: Integration
+//
+//*********************************************
+
+void testprog_integration() {
+    am_util_stdio_printf("Starting Full test program\n");
+    am_util_stdio_printf("- Deep sleep 10 seconds\n");
+    am_util_stdio_printf("- Take measurements, blink output (1blink = 2V, 5blink = 3.3V\n");
+    am_util_stdio_printf("- If high voltage, transmit packet\n");
+
+    int status;
+
+    struct adc adc_storage = {};
+    struct adc *adc_p = &adc_storage;
+
+    am_hal_adc_slot_chan_e channels[] = { 
+        AM_HAL_ADC_SLOT_CHSEL_SE0, 
+        AM_HAL_ADC_SLOT_CHSEL_SE3, 
+        AM_HAL_ADC_SLOT_CHSEL_BATT,
+        AM_HAL_ADC_SLOT_CHSEL_VSS,
+    };
+
+    size_t num_channels = sizeof(channels) / sizeof(channels[0]);
+    uint32_t samples[num_channels] = {};
+
+
+
+    // =====================================================
+    // ==== SETUP RTC, ENABLE INTERRUPTS
+
+    //OR: set RTC with LFRC??
+    am_hal_clkgen_control(AM_HAL_CLKGEN_CONTROL_RTC_SEL_LFRC, 0);
+    am_hal_rtc_osc_enable();
+
+    // Configure alarm to interrupt every second
+    am_hal_rtc_alarm_interval_set(AM_HAL_RTC_ALM_RPT_SEC);
+    // rtc isr will increment g_rtc_isr_count
+
+    // Clear, then enable rtc interrupt
+    am_hal_rtc_int_clear(AM_HAL_RTC_INT_ALM);
+    am_hal_rtc_int_enable(AM_HAL_RTC_INT_ALM);
+    NVIC_EnableIRQ(RTC_IRQn);
+
+
+    am_util_stdio_printf("RTC INTEN = %0x\n", am_hal_rtc_int_enable_get());
+
+
+    // =====================================================
+    // ==== Configure SPI/LORA
+
+
+    // Setup SPI and LORA comms
+    const int CONF_SPI_FREQ = 10000; //10KHz
+    struct spi_bus* spi_bus_0;
+    struct spi_device* lora_spi; // handle to the spi device for the lora module
+    struct lora lora_storage = {};
+    struct lora* lora_obj = &lora_storage; // handle for the lora module, wraps the spi device
+    const uint32_t CONF_LORA_FREQ = 902300000u;
+    const uint8_t CONF_LORA_SF = 7; // min 6, fast, noisy, max 12, slow, robust
+    const uint8_t CONF_LORA_BW = 7;
+    const uint8_t CONF_LORA_CODERATE = 4;
+
+    spi_bus_0 = spi_bus_get_instance(SPI_BUS_0);
+    lora_spi = spi_device_get_instance(spi_bus_0, SPI_CS_0, CONF_SPI_FREQ);
+
+
+
+
+    // =====================================================
+    // ====== CONFIGURE FLASH, SRAM, CACHE FOR DEEP SLEEP
+    am_util_stdio_printf("Configuring mem for deep sleep\n");
+
+    // Enable flash? only bottom 512K?
+    if ( am_hal_pwrctrl_memory_enable(AM_HAL_PWRCTRL_MEM_FLASH_MIN) )
+    { while(1); } //Example busy waits on error?
+
+    // FLASH: In deep sleep, disable all
+    am_hal_pwrctrl_memory_deepsleep_powerdown(AM_HAL_PWRCTRL_MEM_FLASH_MAX);
+
+    // Cache: In deep sleep, disable
+    am_hal_pwrctrl_memory_deepsleep_powerdown(AM_HAL_PWRCTRL_MEM_CACHE);
+
+    // SRAM: In deep sleep, retain all
+    am_hal_pwrctrl_memory_deepsleep_retain(AM_HAL_PWRCTRL_MEM_SRAM_MAX);
+
+
+    // =====================================================
+    // ====== Init ADC
+    
+    am_util_stdio_printf("Initializing ADC to read %d channels\n", num_channels);
+    adc_init_channels(adc_p, channels, num_channels);
+    NVIC_EnableIRQ(ADC_IRQn); // (this should be called by init_channels?)
+    //NVIC_EnableIRQ(ADC_IRQn); // (this should be called by init_channels?)
+
+    // Note: ADC takes about a second to reinitialize if powered down, or on first trigger
+    am_util_stdio_printf("Warming UP ADC...\n");
+    adc_trigger(adc_p);
+    while(!adc_get_sample_channels(adc_p, samples, channels, num_channels)) { 
+        am_hal_sysctrl_sleep(AM_HAL_SYSCTRL_SLEEP_NORMAL);
+    }
+    am_util_stdio_printf("DONE\n");
+
+    //// Shutdown the adc, since main loop wants it to be asleep at start (retains state)
+    //status = am_hal_adc_power_control(adc_p->handle, AM_HAL_SYSCTRL_SLEEP_DEEP, true);
+    //if(status != AM_HAL_STATUS_SUCCESS) 
+    //    { am_util_stdio_printf("ERR: failed to sleep ADC\n"); report(status); }
+
+
+
+
+    while(1) {
+        // Prepare for sleep
+        //jv_print_peripheral_pwr_status();
+        jv_itm_printf_disable();
+        jv_check_deepsleep_ready();
+
+        // Sleep for 5sec
+        g_rtc_isr_count = 0;
+        while(g_rtc_isr_count < 10) {
+            am_hal_sysctrl_sleep(AM_HAL_SYSCTRL_SLEEP_DEEP);
+        }
+
+        // Waking up
+        jv_itm_printf_enable();
+        am_util_stdio_printf("Waking up!\n");
+
+
+        //jv_blink_n(1);
+
+        // ====== Wake the ADC
+        //status = am_hal_adc_power_control(adc_p->handle, AM_HAL_SYSCTRL_WAKE, true);
+        //if(status != AM_HAL_STATUS_SUCCESS) 
+        //    { am_util_stdio_printf("ERR: failed to wake ADC\n"); report(status); }
+
+        am_util_stdio_printf("Enabling dis_sw to read Vin_OC\n");
+        am_hal_gpio_pinconfig(JV_PIN_ADP_DIS_SW, g_AM_HAL_GPIO_OUTPUT);
+        am_hal_gpio_state_write(JV_PIN_ADP_DIS_SW, AM_HAL_GPIO_OUTPUT_SET);
+
+        am_util_stdio_printf("Setting GPIO41 LOW and enabling DIS_SW\n");
+        am_hal_gpio_pinconfig(41, g_AM_HAL_GPIO_OUTPUT);
+        am_hal_gpio_state_write(41, AM_HAL_GPIO_OUTPUT_CLEAR);
+
+        am_hal_gpio_pinconfig(41, g_AM_HAL_GPIO_OUTPUT);
+
+        // Need to delay so bat voltage has time to settle into ADC cap
+        // Bat is a ~500k/500k voltage divider, ESR 250kohm, into a 10nF cap
+        // time constant is 2.5 mS. Testing showed delaying even a few ms is fine
+        //am_util_delay_ms(5); 
+        //am_util_delay_ms(50); 
+        
+        //HOWEVER: the magnesium takes significantly longer to recover
+        //am_util_delay_ms(200); 
+        jv_ctimer_sleep_ms(200); 
+
+        int adc_entries = AM_HAL_ADC_FIFO_COUNT(ADC->FIFO);
+        if (adc_entries > 0) {
+            am_util_stdio_printf("WARNING: %d entries already in ADC FIFO??\n", adc_entries);
+        }
+
+        am_util_stdio_printf("Triggering ADC\n");
+        adc_trigger(adc_p);
+
+        //jv_blink_n(1);
+
+        am_util_stdio_printf("Fetching samples\n");
+        while(!adc_get_sample_channels(adc_p, samples, channels, num_channels)) { 
+            am_hal_sysctrl_sleep(AM_HAL_SYSCTRL_SLEEP_NORMAL);
+        }
+
+        
+        am_util_stdio_printf("Got ADC Samples:\n");
+
+        am_util_stdio_printf("Disabling GPIO41 and re-enabling Sw\n");
+        am_hal_gpio_pinconfig(41, g_AM_HAL_GPIO_DISABLE);
+        am_hal_gpio_state_write(JV_PIN_ADP_DIS_SW, AM_HAL_GPIO_OUTPUT_CLEAR);
+
+        // All voltages measured against ref, some voltages also scaled
+        const double reference = 2.0;
+        const double scale_vadp_batt = 2.08; // external 470/(470+510) = /2.08
+        const double scale_vsupply = 3; // chip has internal /3 to its VDD
+
+        // Convert signals
+        double raw_voltages[num_channels] = {};
+        for (size_t i = 0; i < num_channels; i++) {
+            raw_voltages[i] = samples[i] * reference / ((1 << 14) - 1);
+            //am_util_stdio_printf("Slot %d, chan %d: val 0x%x (%d), %.3lfV\n", i, channels[i], samples[i], samples[i], voltage);
+        }
+        
+        double v_in_OC = 0;  //TODO
+        double v_in_load = raw_voltages[0];
+        double v_batt    = raw_voltages[1] * scale_vadp_batt;
+        double v_supply  = raw_voltages[2] * scale_vsupply;
+        double v_vss     = raw_voltages[3]; // this is GND???
+
+
+        am_util_stdio_printf("vin: %5.3lfV  v_batt: %5.3lfV  VDD: %5.3lfV  VSS: %5.3lfV\n",
+                v_in_load, v_batt, v_supply, v_vss);
+
+
+        //// Shutdown the adc (retains state)
+        //status = am_hal_adc_power_control(adc_p->handle, AM_HAL_SYSCTRL_SLEEP_DEEP, true);
+        //if(status != AM_HAL_STATUS_SUCCESS) 
+        //    { am_util_stdio_printf("ERR: failed to sleep ADC\n"); report(status); }
+
+
+        // Blink to indicate batt voltage:
+        // 1 - 5 blinks is 2 - 3V
+        int num_blinks = (int)((v_batt - 2) * 5) + 1; //2 - 2.2 V should be 1 - 1.99, which is 1 blink. 2.8-3 should be 5-5.99
+        if(num_blinks < 1) { num_blinks = 1;}
+        if(num_blinks > 5) { num_blinks = 5;}
+        jv_blink_n(num_blinks);
+
+        //jv_blink_n(1);
+        
+        if(v_batt > 2.8) {
+            // Light up LED during this
+            set_leds(true);
+            am_util_stdio_printf("Waking UP LORA Module to transmit:\n");
+
+            uint8_t tx_buff[127] = {};
+            //int len = am_util_stdio_snprintf((char*)tx_buff, 127,
+            //        "vin: %5.3lfV  v_batt: %5.3lfV  VDD: %5.3lfV  VSS: %5.3lfV\n",
+            //        v_in_load, v_batt, v_supply, v_vss);
+            
+            int len = am_util_stdio_snprintf((char*)tx_buff, 126,
+                    "DAT1|%s|%5.3lf|%5.3lf|%5.3lf",
+                    CHIP_ID, v_in_load, v_batt, v_supply);
+
+            tx_buff[len] = 0;
+
+            if(len >= 126) {
+                am_util_stdio_printf("ERROR: LORA PACKET TOO LONG (%d bytes)", len);
+            }
+
+            // ==================================
+            // Wake/Configure LORA
+
+            // Enable spi bus, initialize LORA, configure settings
+            if(!spi_bus_enable(spi_bus_0)) { report(-1); }
+            jv_lora_poweron();
+
+            if(!lora_init(lora_obj, lora_spi, CONF_LORA_FREQ, JV_PIN_LORA_DI0)) { report(-1); }
+            if(!lora_set_spreading_factor(lora_obj, CONF_LORA_SF)) { report(-1); }
+            lora_set_bandwidth(lora_obj, CONF_LORA_BW);
+            lora_set_coding_rate(lora_obj, CONF_LORA_CODERATE);
+            
+            // Send packet
+            // Lora is configured, lora_send_packet should put it into standby
+            int tx_bytes = (int)lora_send_packet(lora_obj, tx_buff, len);
+            if (tx_bytes != len) { am_util_stdio_printf("Error: Only sent %d bytes, expected %d!\n", tx_bytes, len); }
+            lora_sleep(lora_obj);
+
+            // disable SPI/LORA
+            spi_bus_sleep(spi_bus_0);
+            jv_lora_poweroff();
+
+            am_util_stdio_printf("Sent Packet of %d bytes\n", tx_bytes);
+            am_util_stdio_printf("Packet: '%s'\n", tx_buff);
+            set_leds(false);
+
+        }
+    }
+}
+
+
+//*********************************************
+//
 //                    main
 //
 //*********************************************
@@ -917,6 +1361,9 @@ int main(void)
     //am_hal_gpio_pinconfig(  JV_PIN_LORA_EN,   g_AM_HAL_GPIO_OUTPUT);
     //am_hal_gpio_state_write(JV_PIN_LORA_EN,   AM_HAL_GPIO_OUTPUT_CLEAR);
     //testprog_sleep();
+
+    // enable interrupts corewide
+    am_hal_interrupt_master_enable();
 
     //*********************************************
     //             INITIALIZE GPIOS
@@ -995,6 +1442,8 @@ int main(void)
     //testprog_helloblinky();
     //testprog_lora();
     //testprog_morse();
-    testprog_sleep();
+    //testprog_sleep();
+    //testprog_adc();
     //testprog_lfrc_cal();
+    testprog_integration();
 }

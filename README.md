@@ -11,8 +11,6 @@ can sustain itself on a trickle of power (<250 uW), and so can run directly
 from the electric potential it's designed to measure. It transmits measurements several times a day
 over a [LoRa](https://en.wikipedia.org/wiki/LoRa) radio, (range of up to 5-15km, depending on conditions)
 
-For more info, please refer to this repo's [wiki](https://github.com/jvorob/cpm-firmware/wiki)
-
 
 ![Photo of the sensor board](board_photo.jpg)
 

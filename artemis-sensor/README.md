@@ -7,9 +7,8 @@ This is the firmware for my Cathodic Protection Sensor Mk1
 
 It's built off of Gabe Marcano's fork of the Ambiq SDK
 I also am using a forked version of Gabe's asimple library
+Build setup forked from `https://github.com/gemarcano/redboard_template`
 
-This repository is a template example of how to configure a project using the
-meson-ified version of the Ambiq Suite SDK.
 
 ## Dependencies
  - https://github.com/gemarcano/AmbiqSuiteSDK

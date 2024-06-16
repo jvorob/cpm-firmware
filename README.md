@@ -21,7 +21,7 @@ There are several parts to this
   and transmit several radio packets a day with voltage measurements.
 
 Firmware in `artemis_cpm_firmware/`
-Hardware in a separate repo: [TODO](TODO)
+Hardware in a separate repo: [cpm-hardware](https://github.com/jvorob/cpm-hardware)
 
 
 ### LoRa Gateway 

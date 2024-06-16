@@ -1,36 +1,34 @@
-# Redboard Artemis Template Project
+Janet Vorobyeva
+2024.06.15
 
-This repository is a template example of how to configure a project using the
-meson-ified version of the Ambiq Suite SDK.
+# Overview
 
-## Dependencies
- - https://github.com/gemarcano/AmbiqSuiteSDK
- - https://github.com/gemarcano/asimple
+This repo contains the firmware for my Cathodic Protection Monitoring project.
 
-In order for the libraries to be found, `pkgconf` must know where they are. The
-special meson cross-file property `sys_root` is used for this, and the
-`artemis` cross-file already has a shortcut for it-- it just needs a
-variable to be overriden. To override a cross-file constant, you only need to
-provide a second cross-file with that variable overriden. For example:
+Designed to monitor a [cathodic protection](https://en.wikipedia.org/wiki/Cathodic_protection) system,
+being able to be inserted into a CP Test station and both monitor and power itself off of the electric
+potential at the station.
 
-Contents of `my_cross`:
-```
-[constants]
-prefix = '/home/gabriel/.local/redboard'
-```
+There are several parts to this
 
-# Compiling and installing
-```
-mkdir build
-cd build
-# The `artemis` cross-file is assumed to be installed per recommendations from
-# the `asimple` repository
-meson setup --prefix [prefix-where-sdk-installed] --cross-file artemis --cross-file ../my_cross --buildtype release
-meson install
-```
+![Photo of the sensor board](board_photo.jpg)
 
-# License
+### Sensor node (custom board)
+- Sparkfun Artemis module (based on Ambiq Apollo3 microcontroller)
+- ADP5091 Energy harvesting chip
+- RFM95W LoRa module, for low power radio transmission
+- Designed to be extremely low power, able to survive on a power budget ~100uW,
+  and transmit several radio packets a day with voltage measurements.
 
-See the license file for details. In summary, this project is licensed
-Apache-2.0, except for the bits copied from the Ambiq SDK, which is BSD
-3-clause licensed.
+Firmware in `artemis_cpm_firmware/`
+Hardware in a separate repo: [TODO](TODO)
+
+
+### LoRa Gateway 
+Currently this is a 
+Heltec AB02A LoRa node duct-taped to a 
+nodeMCU ESP32-S (?) module (devboard around a ESP-WROOM-32 module?)
+to act as a gateway, uploading received LoRa packets to a [grist](getgrist.com) document.
+
+(this part was meant as a quick and dirty solution, and it very much is)
+

@@ -11,6 +11,7 @@ project('redboard_template', 'c',
 c_args = [
   '-ffunction-sections',
   '-ggdb', #Lets include max debug symbols
+  #'-O0',
 ]
 
 link_args = [

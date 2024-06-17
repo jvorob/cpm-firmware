@@ -371,7 +371,7 @@ void jv_blink_n(int n) {
     // (Split into first blink/next blinks to avoid extra sleep at end)
     for(int i = 0; i < n-1; i++) { // this happens n-1 times
         //am_util_delay_ms(50);
-        jv_ctimer_sleep_ms(100);
+        jv_ctimer_sleep_ms(200);
         set_leds(true);
         //am_util_delay_ms(50);
         jv_ctimer_sleep_ms(50);
@@ -1175,6 +1175,7 @@ void testprog_integration() {
     //    { am_util_stdio_printf("ERR: failed to sleep ADC\n"); report(status); }
 
 
+    bool first_time = true;
 
 
     while(1) {
@@ -1183,10 +1184,16 @@ void testprog_integration() {
         jv_itm_printf_disable();
         jv_check_deepsleep_ready();
 
-        // Sleep for 5sec
-        g_rtc_isr_count = 0;
-        while(g_rtc_isr_count < 10) {
-            am_hal_sysctrl_sleep(AM_HAL_SYSCTRL_SLEEP_DEEP);
+        // Sleep for 60sec
+        // First time: sleep for 1 sec for debug purposes
+        if(first_time) {
+            jv_ctimer_sleep_ms(1000);
+            first_time = false;
+        } else {
+            g_rtc_isr_count = 0;
+            while(g_rtc_isr_count < 60) {
+                am_hal_sysctrl_sleep(AM_HAL_SYSCTRL_SLEEP_DEEP);
+            }
         }
 
         // Waking up

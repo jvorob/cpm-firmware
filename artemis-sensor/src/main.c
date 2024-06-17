@@ -841,19 +841,29 @@ void testprog_sleep() {
 
         switch(sleep_phase) {
             case 1: {
-                am_util_stdio_printf("Sleep phase 1: Disabling LORA, entering normal sleep\n");
+                am_util_stdio_printf("Sleep phase 1: Deep sleep\n");
 
                 // disable LORA
                 jv_lora_poweroff();
 
                 //stay awake for 0.1s
-                am_util_delay_ms(100);
+                //am_util_delay_ms(100);
 
 
             }
             break;
             case 2: {
-                am_util_stdio_printf("Sleep phase 2: Enabling LORA stbdy, then LORA sleep, then deep sleeping\n");
+                am_util_stdio_printf("Sleep phase 2: Awake for 200ms, then normal sleep\n");
+
+                am_util_delay_ms(400);
+
+
+
+            }
+            break;
+
+            case 3: {
+                am_util_stdio_printf("Sleep phase 3: Lora sleep, Lora stdby, Lora TX\n");
 
                 // enable LORA
                 jv_lora_poweron();
@@ -865,39 +875,23 @@ void testprog_sleep() {
                 lora_set_bandwidth(lora_obj, CONF_LORA_BW);
                 lora_set_coding_rate(lora_obj, CONF_LORA_CODERATE);
 
+                // Put Lora to sleep for 200ms
+                if(!spi_bus_enable(spi_bus_0)) { report(-1); }
+                lora_sleep(lora_obj);
+                spi_bus_sleep(spi_bus_0);
+                am_util_delay_ms(200);
+
                 // Put Lora to STNDBY for 200ms
+                if(!spi_bus_enable(spi_bus_0)) { report(-1); }
                 lora_standby(lora_obj);
                 spi_bus_sleep(spi_bus_0);
                 am_util_delay_ms(200);
 
-                // Put Lora to sleep
-                if(!spi_bus_enable(spi_bus_0)) { report(-1); }
-                lora_sleep(lora_obj);
-                spi_bus_sleep(spi_bus_0);
 
-                // 200ms later, go to sleep
-                am_util_delay_ms(200);
-
-                // // Send packet
-                // if(!spi_bus_enable(spi_bus_0)) { report(-1); }
-                // // Lora is configured, lora_send_packet should put it into standby
-                // char tx_buff[] = "Test packet!\n\0";
-                // int len = am_util_string_strlen(tx_buff);
-                // int tx_bytes = (int)lora_send_packet(lora_obj, tx_buff, len);
-                // if (tx_bytes != len) { am_util_stdio_printf("Error: Only sent %d bytes, expected %d!\n", tx_bytes, len); }
-                // lora_sleep();
-
-
-
-            }
-            break;
-
-            case 3: {
-                am_util_stdio_printf("Sleep phase 3: Sending LORA packet, then sleeping\n");
+                // Send Lora Packet
 
                 // LORA should already be powered on / configured
                 // lora_send_packet should put it into standby
-
                 if(!spi_bus_enable(spi_bus_0)) { report(-1); }
                 uint8_t tx_buff[] = "Test packet!\n\0";
                 int len = am_util_string_strlen((char*)tx_buff);
@@ -905,6 +899,9 @@ void testprog_sleep() {
                 if (tx_bytes != len) { am_util_stdio_printf("Error: Only sent %d bytes, expected %d!\n", tx_bytes, len); }
                 lora_sleep(lora_obj);
                 spi_bus_sleep(spi_bus_0);
+
+                // Go to sleep
+                jv_lora_poweroff();
             }
 
         }
@@ -932,7 +929,7 @@ void testprog_sleep() {
         //go to sleep
 
 
-        if(sleep_phase == 1) {
+        if(sleep_phase == 2) {
             am_hal_sysctrl_sleep(AM_HAL_SYSCTRL_SLEEP_NORMAL);
         } else {
             am_hal_sysctrl_sleep(AM_HAL_SYSCTRL_SLEEP_DEEP);

@@ -31,11 +31,12 @@ This work was inspired by the paper:
 - ADP5091 Energy harvesting chip
 - RFM95W LoRa module, for long-range radio transmission
 
-Electrical schematics are in this repo: [cpm-hardware](https://github.com/jvorob/cpm-hardware)
-
-# Organization
+### Repo Index
 
 `artemis-sensor/` contains the firmware for the main board.
+
+[jvorob/cpm-hardware](https://github.com/jvorob/cpm-hardware)
+(separate repo) contains electrical schematics for the main board.
 
 `gateway/` contains firmware for my hacked-together LoRa-Wifi bridge, frankensteined together
 from a Heltec AB02A LoRa node and a nodemcu-32S WiFi module (ESP32 devboard).

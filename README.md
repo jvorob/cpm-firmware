@@ -11,13 +11,13 @@ can sustain itself on a trickle of power (tested down to 150 uW), and so can run
 from the electric potential it's designed to measure. It transmits measurements several times a day
 over a LoRa radio, (range of up to 5-15km, depending on conditions)
 
+**You can see the full details in this [writeup of the project](project_writeup.pdf)**
 
 <img src="board_annotated.png" width="50%">
 
-You can see the full details in this [writeup of the project](project_writeup.pdf)
 
 
-This work was inspired by the paper: 
+This work was inspired by / based on the paper: 
 > [Repurposing Cathodic Protection Systems as Reliable, in-situ, Ambient Batteries for Sensor Networks](https://dl.acm.org/doi/10.1145/3412382.3458277)
 
 
@@ -28,8 +28,8 @@ This work was inspired by the paper:
 
 ### Hardware:
 - [Sparkfun Artemis](https://www.sparkfun.com/artemis) module (based on Ambiq Apollo3 microcontroller)
-- ADP5091 Energy harvesting chip
-- RFM95W LoRa module, for long-range radio transmission
+- [ADP5091](https://www.analog.com/en/products/adp5091.html) Energy harvesting chip
+- [RFM95W](https://cdn.sparkfun.com/assets/a/9/6/1/0/RFM95W-V2.0.pdf) LoRa module, for long-range radio transmission
 
 ### Repo Index
 

@@ -42,5 +42,3 @@ This work was inspired by / based on the paper:
 from a Heltec AB02A LoRa node and a nodemcu-32S WiFi module (ESP32 devboard).
 (this was quick-and-dirty solution, done as lazily as possible using whatever Arduino
 libraries I could scrounge up for the purpose, and so should not be replicated by anyone)
-[Grist](getgrist.com) document.
-
